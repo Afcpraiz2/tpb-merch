@@ -8,13 +8,24 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- TPB CHATBOT CONFIGURATION ---
-// Using the provided key and ensuring the environment can also inject it if needed
-const apiKey = "AIzaSyBWafBlSyWMymHTXfQspkzmI1Pv3DOLx8M"; 
+// Mandatory: set to empty string; the environment provides the key at runtime.
+const apiKey = ""; 
+
+// --- ANIMATION VARIANTS (Fixed: Added missing definitions) ---
+const fadeInUp = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.5, ease: "easeOut" }
+};
+
+const staggerContainer = {
+  animate: { transition: { staggerChildren: 0.1 } }
+};
 
 /**
  * Fast & Robust Gemini API Caller
- * Optimized for Nigerian Pidgin and the Lagos Street Vibe.
- * Uses the mandatory gemini-2.5-flash-preview-09-2025 model.
+ * Optimized with mandatory exponential backoff: 
+ * Retries up to 5 times with delays of 1s, 2s, 4s, 8s, 16s.
  */
 const callTpbBot = async (prompt) => {
   const CHAT_SYSTEM_PROMPT = `You be the official TPB Merch House assistant. 
@@ -36,21 +47,20 @@ Details:
 
 Job: Help customers find wetin fit them and convince them to buy. Keep answers short and punchy!`;
 
-  // Only gemini-2.5-flash-preview-09-2025 is supported in the preview environment
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
   
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
     systemInstruction: { parts: [{ text: CHAT_SYSTEM_PROMPT }] },
     generationConfig: {
-      maxOutputTokens: 150, // Keep responses short for speed
+      maxOutputTokens: 150,
       temperature: 0.7,
     }
   };
 
-  let delay = 1000;
-  // Reduced retry count to 3 for faster failure/recovery feedback
-  for (let i = 0; i < 3; i++) {
+  const retryDelays = [1000, 2000, 4000, 8000, 16000];
+  
+  for (let i = 0; i <= 5; i++) {
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -59,22 +69,24 @@ Job: Help customers find wetin fit them and convince them to buy. Keep answers s
       });
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        if (response.status === 429) return "Omo, too many people dey talk to me. Abeg wait like 30 seconds.";
-        if (response.status === 403 || response.status === 400) {
-          console.error("Gemini API Key Error:", errData);
-          return "Abeg check the API key, e be like say restriction dey from Google side.";
+        if (i < 5 && (response.status === 429 || response.status >= 500)) {
+          await new Promise(resolve => setTimeout(resolve, retryDelays[i]));
+          continue;
         }
-        throw new Error('API Error');
+        if (response.status === 429) return "Omo, too many people dey talk to me right now. Abeg wait small try again.";
+        return "Network trip bad small. Abeg wait and try again.";
       }
 
       const result = await response.json();
       const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-      return text || "I loss for words small, abeg talk another one.";
+      return typeof text === 'string' ? text : "I loss for words small, abeg talk another one.";
+      
     } catch (error) {
-      if (i === 2) return "Network trip bad well-well. Abeg refresh the page try again.";
-      await new Promise(r => setTimeout(r, delay));
-      delay *= 2;
+      if (i < 5) {
+        await new Promise(resolve => setTimeout(resolve, retryDelays[i]));
+        continue;
+      }
+      return "Network trip bad small. Abeg refresh the page try again.";
     }
   }
 };
@@ -199,7 +211,7 @@ const App = () => {
     setIsTyping(true);
     
     const botResponse = await callTpbBot(currentInput);
-    setChatMessages(prev => [...prev, { role: 'assistant', text: botResponse }]);
+    setChatMessages(prev => [...prev, { role: 'assistant', text: String(botResponse) }]);
     setIsTyping(false);
   };
 
@@ -256,7 +268,7 @@ const App = () => {
       </nav>
 
       <header className="relative py-20 px-4 mt-4">
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-7xl mx-auto rounded-[3.5rem] overflow-hidden relative shadow-2xl bg-blue-950 min-h-[500px] flex items-center">
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.8 }} className="max-w-7xl mx-auto rounded-[3.5rem] overflow-hidden relative shadow-2xl bg-blue-950 min-h-[500px] flex items-center">
           <KampalaPattern />
           <div className="relative z-10 p-8 md:p-24 text-white max-w-4xl">
             <div className="inline-flex items-center gap-2 bg-orange-500/20 text-orange-400 px-5 py-2 rounded-full border border-orange-500/30 text-[10px] font-black mb-8 tracking-[0.2em] uppercase">
@@ -264,7 +276,7 @@ const App = () => {
             </div>
             <h2 className="text-6xl md:text-9xl font-black leading-[0.85] mb-8 uppercase tracking-tighter">
               DRESS THE <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-br from-orange-400 via-yellow-200 to-orange-600">IDENTITY</span>
+              <motion.span initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5, duration: 1 }} className="text-transparent bg-clip-text bg-gradient-to-br from-orange-400 via-yellow-200 to-orange-600">IDENTITY</motion.span>
             </h2>
             <p className="text-xl md:text-3xl text-blue-100/70 mb-12 max-w-2xl font-medium tracking-tight">Pure Kampala vibes, Ankara details, and that TPB energy wey no dey finish.</p>
           </div>
@@ -284,13 +296,13 @@ const App = () => {
           </div>
         </div>
 
-        <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
+        <motion.div layout variants={staggerContainer} initial="initial" whileInView="animate" viewport={{ once: true }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
           <AnimatePresence mode='popLayout'>
             {filteredProducts.map((product) => (
-              <motion.div key={product.id} layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="group flex flex-col h-full bg-white rounded-[3rem] overflow-hidden border border-stone-100 hover:border-orange-300 transition-all duration-500 hover:shadow-3xl">
+              <motion.div key={product.id} layout initial="initial" animate="animate" variants={fadeInUp} className="group flex flex-col h-full bg-white rounded-[3rem] overflow-hidden border border-stone-100 hover:border-orange-300 transition-all duration-500 hover:shadow-3xl">
                 <div className="aspect-[4/5] bg-stone-50 overflow-hidden relative">
                   <motion.img whileHover={{ scale: 1.05 }} src={product.image} alt={product.name} className="w-full h-full object-cover" />
-                  <div className="absolute top-8 left-8"><span className="bg-white/95 px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest text-blue-950 shadow-sm border border-stone-100">{product.category}</span></div>
+                  <div className="absolute top-8 left-8"><span className="bg-white/95 backdrop-blur-md px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest text-blue-950 shadow-sm border border-stone-100">{product.category}</span></div>
                 </div>
                 <div className="p-10 flex-1 flex flex-col">
                   <div className="flex justify-between items-start mb-4">
@@ -316,7 +328,6 @@ const App = () => {
         </motion.div>
       </main>
 
-      {/* Brand Block */}
       <div className="max-w-7xl mx-auto px-4 mb-24 grid grid-cols-1 md:grid-cols-3 gap-8 p-12 bg-blue-950 rounded-[3.5rem] relative overflow-hidden shadow-2xl">
         <KampalaPattern />
         <div className="relative z-10 text-center md:text-left"><div className="w-16 h-16 bg-orange-600 rounded-2xl flex items-center justify-center text-white mx-auto md:mx-0 mb-6 shadow-xl shadow-orange-950/20"><Truck size={32} /></div><h5 className="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Sharp Delivery</h5><p className="text-blue-100/60 font-bold text-sm leading-relaxed">Lagos, Abuja, London, or Atlanta—we go reach you sharp-sharp. No stories.</p></div>
@@ -326,9 +337,13 @@ const App = () => {
 
       <footer className="bg-stone-950 text-white pt-24 pb-12 relative overflow-hidden text-center md:text-left">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-12 gap-16 mb-20 relative z-10">
-          <div className="md:col-span-5"><div className="flex items-center gap-3 mb-8 justify-center md:justify-start"><div className="w-12 h-12 bg-white text-stone-950 flex items-center justify-center font-black rounded-xl text-xl shadow-lg">TPB</div><h6 className="font-black text-3xl uppercase tracking-tighter font-bold">Merch House</h6></div><p className="text-stone-400 text-lg font-medium leading-relaxed max-w-md mx-auto md:mx-0 mb-8 font-bold">The only place where Pidgin excellence meets premium streetwear. We no just dey sell clothes, we dey sell Identity.</p><div className="flex gap-4 justify-center md:justify-start">{[Instagram, Twitter, Facebook].map((Icon, i) => (<motion.a key={i} href="#" whileHover={{ y: -5, color: '#ea580c' }} className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center transition-colors"><Icon size={20} /></motion.a>))}</div></div>
-          <div className="md:col-span-4"><h6 className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-500 mb-8 font-bold">Stay Sharp</h6><p className="text-stone-400 font-bold text-sm mb-6">Drop your email make we dey alert you when fresh gbedu land.</p><div className="relative max-w-xs mx-auto md:mx-0"><input type="email" placeholder="you@email.com" className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-sm font-bold focus:ring-2 ring-orange-500 outline-none font-bold" /><button className="absolute right-2 top-2 bg-white text-stone-950 p-2 rounded-xl hover:bg-orange-600 hover:text-white transition-all"><ChevronRight size={20} /></button></div></div>
-          <div className="md:col-span-3 flex flex-col items-center md:items-end justify-center font-black font-bold"><p className="text-stone-500 uppercase text-[10px] tracking-[0.3em] text-center md:text-right">© 2026 THE PIDGIN BLOG MERCH HOUSE. REPRESENT THE CULTURE.</p></div>
+          <div className="md:col-span-5"><div className="flex items-center gap-3 mb-8 justify-center md:justify-start"><div className="w-12 h-12 bg-white text-stone-950 flex items-center justify-center font-black rounded-xl text-xl shadow-lg">TPB</div><h6 className="font-black text-3xl uppercase tracking-tighter">Merch House</h6></div><p className="text-stone-400 text-lg font-medium leading-relaxed max-w-md mx-auto md:mx-0 mb-8">The only place where Pidgin excellence meets premium streetwear. We no just dey sell clothes, we dey sell Identity.</p><div className="flex gap-4 justify-center md:justify-start">
+            <motion.a href="#" whileHover={{ y: -5, color: '#ea580c' }} className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center transition-colors"><Instagram size={20} /></motion.a>
+            <motion.a href="#" whileHover={{ y: -5, color: '#ea580c' }} className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center transition-colors"><Twitter size={20} /></motion.a>
+            <motion.a href="#" whileHover={{ y: -5, color: '#ea580c' }} className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center transition-colors"><Facebook size={20} /></motion.a>
+          </div></div>
+          <div className="md:col-span-4"><h6 className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-500 mb-8">Stay Sharp</h6><p className="text-stone-400 font-bold text-sm mb-6">Drop your email make we dey alert you when fresh gbedu land.</p><div className="relative max-w-xs mx-auto md:mx-0"><input type="email" placeholder="you@email.com" className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-sm font-bold focus:ring-2 ring-orange-500 outline-none" /><button className="absolute right-2 top-2 bg-white text-stone-950 p-2 rounded-xl hover:bg-orange-600 hover:text-white transition-all"><ChevronRight size={20} /></button></div></div>
+          <div className="md:col-span-3 flex flex-col items-center md:items-end justify-center"><p className="text-stone-500 font-black uppercase text-[10px] tracking-[0.3em] text-center md:text-right">© 2026 THE PIDGIN BLOG MERCH HOUSE. REPRESENT THE CULTURE.</p></div>
         </div>
         <AnkaraBorder className="absolute bottom-0 left-0" />
       </footer>
@@ -341,17 +356,17 @@ const App = () => {
               <div className="p-8 bg-blue-950 text-white flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center font-black shadow-lg">TPB</div>
-                  <div><h4 className="text-sm uppercase tracking-tighter font-bold">Merch Guy</h4><span className="text-[10px] opacity-60 tracking-widest uppercase flex items-center gap-1.5 font-bold"><span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span> Fast AI Bot</span></div>
+                  <div><h4 className="text-sm uppercase tracking-tighter">Merch Guy</h4><span className="text-[10px] opacity-60 tracking-widest uppercase flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span> Fast AI Bot</span></div>
                 </div>
                 <button onClick={() => setIsChatOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar bg-stone-50/50">
-                {chatMessages.map((msg, i) => (<div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] p-5 rounded-3xl text-sm font-bold ${msg.role === 'user' ? 'bg-stone-900 text-white rounded-br-none' : 'bg-white text-stone-800 shadow-sm border border-stone-100 rounded-bl-none'}`}>{msg.text}</div></div>))}
-                {isTyping && <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1 }} className="text-stone-400 text-[10px] uppercase tracking-widest pl-2 font-black font-bold">Guy dey type sharp-sharp...</motion.div>}
+                {chatMessages.map((msg, i) => (<div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] p-5 rounded-3xl text-sm ${msg.role === 'user' ? 'bg-stone-900 text-white rounded-br-none' : 'bg-white text-stone-800 shadow-sm border border-stone-100 rounded-bl-none'}`}>{msg.text}</div></div>))}
+                {isTyping && <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1 }} className="text-stone-400 text-[10px] uppercase tracking-widest pl-2 font-black">Guy dey type sharp-sharp...</motion.div>}
                 <div ref={chatEndRef} />
               </div>
               <div className="p-6 bg-white border-t border-stone-100 flex gap-3">
-                <input type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Ask me anything in Pidgin..." className="flex-1 bg-stone-50 border-none rounded-2xl px-5 py-4 text-sm focus:ring-2 ring-orange-500 outline-none font-bold" />
+                <input type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Ask me anything in Pidgin..." className="flex-1 bg-stone-50 border-none rounded-2xl px-5 py-4 text-sm focus:ring-2 ring-orange-500 outline-none" />
                 <button onClick={sendMessage} className="bg-orange-600 text-white p-4 rounded-2xl shadow-lg active:scale-95 transition-transform"><Send size={20} /></button>
               </div>
             </motion.div>
@@ -360,7 +375,7 @@ const App = () => {
         
         <div className="relative group flex items-center justify-end">
           {!isChatOpen && (
-             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="absolute right-16 top-1/2 -translate-y-1/2 bg-stone-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl border border-stone-800 whitespace-nowrap mr-2 pointer-events-none font-bold">Ask Me</motion.div>
+             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="absolute right-16 top-1/2 -translate-y-1/2 bg-stone-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl border border-stone-800 whitespace-nowrap mr-2 pointer-events-none">Ask Me</motion.div>
           )}
           <motion.button 
             whileHover={{ scale: 1.1 }}
@@ -382,29 +397,29 @@ const App = () => {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-stone-950/40 backdrop-blur-md" onClick={() => setIsCartOpen(false)} />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 30 }} className="absolute right-0 top-0 h-full w-full max-w-xl bg-white shadow-5xl flex flex-col font-black">
               <AnkaraBorder className="absolute top-0 left-0" />
-              <div className="p-10 pt-16 flex items-center justify-between border-b border-stone-50"><div><h2 className="text-4xl uppercase tracking-tight tracking-tight font-bold">{checkoutStep === 'cart' ? 'Your Basket' : 'Details'}</h2><p className="text-[10px] text-stone-400 uppercase tracking-widest mt-1 font-bold">Represent the Culture</p></div><button onClick={() => setIsCartOpen(false)} className="p-4"><X size={32} /></button></div>
+              <div className="p-10 pt-16 flex items-center justify-between border-b border-stone-50"><div><h2 className="text-4xl uppercase tracking-tighter">{checkoutStep === 'cart' ? 'Your Basket' : 'Details'}</h2><p className="text-[10px] text-stone-400 uppercase tracking-widest mt-1">Represent the Culture</p></div><button onClick={() => setIsCartOpen(false)} className="p-4"><X size={32} /></button></div>
               <div className="flex-1 overflow-y-auto p-10 no-scrollbar">
-                {checkoutStep === 'cart' ? (cart.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-center opacity-30"><ShoppingBag size={64} className="mb-6" /><h3 className="text-2xl uppercase tracking-widest font-black font-bold">No Gbedu inside</h3></div> : <div className="space-y-10">{cart.map((item, i) => (
+                {checkoutStep === 'cart' ? (cart.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-center opacity-30"><ShoppingBag size={64} className="mb-6" /><h3 className="text-2xl uppercase tracking-widest font-black">No Gbedu inside</h3></div> : <div className="space-y-10">{cart.map((item, i) => (
                     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} key={`${item.id}-${item.size}`} className="flex gap-8 group">
-                      <div className="w-32 h-40 bg-stone-100 rounded-[2rem] overflow-hidden shrink-0 shadow-sm font-bold"><img src={item.image} alt={item.name} className="w-full h-full object-cover" /></div>
+                      <div className="w-32 h-40 bg-stone-100 rounded-[2rem] overflow-hidden shrink-0 shadow-sm"><img src={item.image} alt={item.name} className="w-full h-full object-cover" /></div>
                       <div className="flex-1 flex flex-col justify-between py-2">
-                        <div className="flex justify-between items-start uppercase font-bold"><h4>{item.name}</h4><button onClick={() => updateQty(item.id, item.size, -item.qty)}><Trash2 size={20} className="text-stone-300 hover:text-red-500 transition-colors" /></button></div>
-                        <span className="inline-block px-3 py-1 bg-stone-100 rounded-lg text-[10px] uppercase mt-2 text-stone-500 w-fit font-bold">Size: {item.size}</span>
+                        <div className="flex justify-between items-start uppercase"><h4>{item.name}</h4><button onClick={() => updateQty(item.id, item.size, -item.qty)}><Trash2 size={20} className="text-stone-300 hover:text-red-500 transition-colors" /></button></div>
+                        <span className="inline-block px-3 py-1 bg-stone-100 rounded-lg text-[10px] uppercase mt-2 text-stone-500 w-fit">Size: {item.size}</span>
                         <div className="flex items-center justify-between mt-4">
-                          <div className="flex items-center gap-5 bg-stone-50 rounded-2xl px-5 py-3 shadow-inner font-black font-bold"><button onClick={() => updateQty(item.id, item.size, -1)}><Minus size={14}/></button><span>{item.qty}</span><button onClick={() => updateQty(item.id, item.size, 1)}><Plus size={14}/></button></div>
-                          <span className="text-xl font-black font-bold">₦{(item.price * item.qty).toLocaleString()}</span>
+                          <div className="flex items-center gap-5 bg-stone-50 rounded-2xl px-5 py-3 shadow-inner font-black"><button onClick={() => updateQty(item.id, item.size, -1)}><Minus size={14}/></button><span>{item.qty}</span><button onClick={() => updateQty(item.id, item.size, 1)}><Plus size={14}/></button></div>
+                          <span className="text-xl font-black">₦{(item.price * item.qty).toLocaleString()}</span>
                         </div>
                       </div>
                     </motion.div>
-                  ))}</div>) : (<div className="space-y-8 uppercase font-black font-bold">{['fullName', 'email', 'phone'].map(field => (<div key={field} className="space-y-3 font-black font-bold"><label className="text-[10px] text-stone-400 tracking-widest font-bold">{field}</label><input type={field === 'email' ? 'email' : 'text'} name={field} value={formData[field]} onChange={handleInputChange} className="w-full p-6 bg-stone-50 border-none rounded-[1.5rem] focus:ring-2 ring-orange-500 outline-none font-bold" /></div>))}<div className="space-y-3 font-black font-bold"><label className="text-[10px] text-stone-400 tracking-widest font-bold">Delivery Address</label><textarea name="address" value={formData.address} onChange={handleInputChange} rows="4" className="w-full p-6 bg-stone-50 border-none rounded-[1.5rem] focus:ring-2 ring-orange-500 resize-none outline-none font-bold" /></div></div>)}
+                  ))}</div>) : (<div className="space-y-8 uppercase font-black">{['fullName', 'email', 'phone'].map(field => (<div key={field} className="space-y-3 font-black"><label className="text-[10px] text-stone-400 tracking-widest">{field}</label><input type={field === 'email' ? 'email' : 'text'} name={field} value={formData[field]} onChange={handleInputChange} className="w-full p-6 bg-stone-50 border-none rounded-[1.5rem] focus:ring-2 ring-orange-500 outline-none font-bold" /></div>))}<div className="space-y-3 font-black"><label className="text-[10px] text-stone-400 tracking-widest">Delivery Address</label><textarea name="address" value={formData.address} onChange={handleInputChange} rows="4" className="w-full p-6 bg-stone-50 border-none rounded-[1.5rem] focus:ring-2 ring-orange-500 resize-none outline-none font-bold" /></div></div>)}
               </div>
-              {cart.length > 0 && (<div className="p-10 bg-stone-50 border-t border-stone-100 space-y-8 font-black font-bold"><div className="flex justify-between items-center font-bold"><span className="text-stone-400 text-sm uppercase tracking-widest font-black font-bold">Grand Total</span><span className="text-4xl font-black font-bold">₦{cart.reduce((acc, item) => acc + (item.price * item.qty), 0).toLocaleString()}</span></div>{checkoutStep === 'cart' ? <button onClick={() => setCheckoutStep('details')} className="w-full bg-stone-950 text-white py-8 rounded-[2rem] text-xl uppercase tracking-widest shadow-2xl font-black font-bold">Confirm Details</button> : <button onClick={payWithPaystack} disabled={!isFormValid || !paystackLoaded} className="w-full bg-orange-600 disabled:bg-stone-200 text-white py-8 rounded-[2rem] text-xl uppercase tracking-widest shadow-3xl font-black font-bold">Pay Now (No Dulling)</button>}</div>)}
+              {cart.length > 0 && (<div className="p-10 bg-stone-50 border-t border-stone-100 space-y-8 font-black"><div className="flex justify-between items-center"><span className="text-stone-400 text-sm uppercase tracking-widest font-black">Grand Total</span><span className="text-4xl font-black">₦{cart.reduce((acc, item) => acc + (item.price * item.qty), 0).toLocaleString()}</span></div>{checkoutStep === 'cart' ? <button onClick={() => setCheckoutStep('details')} className="w-full bg-stone-950 text-white py-8 rounded-[2rem] text-xl uppercase tracking-widest shadow-2xl font-black">Confirm Details</button> : <button onClick={payWithPaystack} disabled={!isFormValid} className="w-full bg-orange-600 disabled:bg-stone-200 text-white py-8 rounded-[2rem] text-xl uppercase tracking-widest shadow-3xl font-black">Pay Now (No Dulling)</button>}</div>)}
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      <AnimatePresence>{orderPlaced && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-blue-950/90 backdrop-blur-xl"><motion.div initial={{ scale: 0.8, y: 50 }} animate={{ scale: 1, y: 0 }} className="bg-white rounded-[4rem] p-16 max-w-lg w-full text-center shadow-5xl border-8 border-orange-500/10"><div className="w-32 h-32 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-10 shadow-inner font-bold"><ShieldCheck size={64} /></div><h4 className="text-5xl font-black mb-6 uppercase tracking-tighter font-bold">E DON HAPPEN! 🎉</h4><p className="text-stone-500 font-bold mb-12 uppercase text-sm font-bold">Order confirmed sharp-sharp. Look out for our call.</p><div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden font-bold"><motion.div initial={{ x: '-100%' }} animate={{ x: '0%' }} transition={{ duration: 5 }} className="h-full bg-orange-600"></motion.div></div></motion.div></motion.div>)}</AnimatePresence>
+      <AnimatePresence>{orderPlaced && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-blue-950/90 backdrop-blur-xl"><motion.div initial={{ scale: 0.8, y: 50 }} animate={{ scale: 1, y: 0 }} className="bg-white rounded-[4rem] p-16 max-w-lg w-full text-center shadow-5xl border-8 border-orange-500/10"><div className="w-32 h-32 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-10 shadow-inner font-bold"><ShieldCheck size={64} /></div><h4 className="text-5xl font-black mb-6 uppercase tracking-tighter font-bold">E DON HAPPEN! 🎉</h4><p className="text-stone-500 font-bold mb-12 uppercase text-sm">Order confirmed sharp-sharp. Look out for our call.</p><div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden"><motion.div initial={{ x: '-100%' }} animate={{ x: '0%' }} transition={{ duration: 5 }} className="h-full bg-orange-600"></motion.div></div></motion.div></motion.div>)}</AnimatePresence>
       <style>{`.no-scrollbar::-webkit-scrollbar { display: none; }.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }::selection { background: #ea580c; color: white; }`}</style>
     </div>
   );
