@@ -8,13 +8,29 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- GEMINI API CONFIGURATION ---
-const apiKey = ""; 
+// We use a helper function to safely get the key and prevent build-time errors
+const getApiKey = () => {
+  const hardcodedKey = "AIzaSyCVzKqa-jDzoghZj-ec2eb-YwPWZ7hz2wY";
+  try {
+    // Check for Vercel/Vite environment variables first
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
+      return import.meta.env.VITE_GEMINI_API_KEY;
+    }
+  } catch (e) {
+    // Fail silently to hardcoded key
+  }
+  return hardcodedKey;
+};
+
+const apiKey = getApiKey();
 
 /**
  * Robust API caller with exponential backoff.
  * Retries up to 5 times with delays of 1s, 2s, 4s, 8s, 16s.
  */
 const callGeminiWithRetry = async (prompt, systemInstruction) => {
+  if (!apiKey) return "Omo, I never see API key. Check your settings!";
+  
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
   
   const payload = {
@@ -32,10 +48,15 @@ const callGeminiWithRetry = async (prompt, systemInstruction) => {
       });
 
       if (!response.ok) {
+        // If we get a 403 or similar, it's an API key issue
+        if (response.status === 403 || response.status === 401) {
+          return "Omo, your API key no dey work or e don expire. Check Vercel settings.";
+        }
+        // Retry on 429 (rate limit) or 500s
         if (response.status === 429 || response.status >= 500) {
           throw new Error('Retryable error');
         }
-        return "Omo, API key issue or server down. Abeg check your Vercel settings.";
+        return `E be like say server dey vex (${response.status}). Abeg try again.`;
       }
 
       const result = await response.json();
