@@ -7,23 +7,65 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// --- GEMINI API CHATBOT LOGIC ---
-const getApiKey = () => {
-  const hardcodedKey = "AIzaSyCVzKqa-jDzoghZj-ec2eb-YwPWZ7hz2wY";
-  try {
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
-      return import.meta.env.VITE_GEMINI_API_KEY;
+// --- GEMINI API CONFIGURATION ---
+const apiKey = ""; 
+
+/**
+ * Robust API caller with exponential backoff.
+ * Retries up to 5 times with delays of 1s, 2s, 4s, 8s, 16s.
+ */
+const callGeminiWithRetry = async (prompt, systemInstruction) => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    systemInstruction: { parts: [{ text: systemInstruction }] }
+  };
+
+  let delay = 1000;
+  for (let i = 0; i <= 5; i++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        if (response.status === 429 || response.status >= 500) {
+          throw new Error('Retryable error');
+        }
+        return "Omo, API key issue or server down. Abeg check your Vercel settings.";
+      }
+
+      const result = await response.json();
+      const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      return text || "E be like say I loss for words small, abeg talk another one.";
+    } catch (error) {
+      if (i === 5) return "Network trip bad well-well. Abeg refresh the page or wait small.";
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
     }
-  } catch (e) {}
-  return hardcodedKey || "";
+  }
 };
 
-const apiKey = getApiKey();
-
 const CHAT_SYSTEM_PROMPT = `You be the official TPB Merch House assistant. 
-Your name na "TPB Merch Guy". Strictly talk in Nigerian Pidgin only. 
-Help customers find merch (Hoodies, Shirts, Caps, Shorts), talk about sizes (S to XXL), and delivery. 
-Be funny, friendly, and vibey.`;
+Your name na "TPB Merch Guy". You be Lagos street-smart, funny, and 100% fluent for Nigerian Pidgin. 
+Strictly talk in Nigerian Pidgin only. No talk big grammar.
+
+Items wey we get for shop:
+1. TPB 'Signature' Hoodie - ₦32,000 (Heavyweight cotton, Kampala accents)
+2. TPB 'Lamba' Shorts - ₦18,000 (Breathable, Lagos heat-ready)
+3. TPB 'Wetin Dey' Tee - ₦14,500 (Premium black cotton, no-fade print)
+4. TPB Mesh Trucker Cap - ₦9,000 (Script embroidery)
+5. TPB Street Joggers - ₦25,000 (Slim-fit, Ankara pockets)
+6. TPB Branding Tote - ₦6,500 (Heavy canvas)
+
+Sizes: We get from S to XXL for shirts, hoodies, and joggers.
+Delivery: We deliver everywhere (Lagos, Abuja, Overseas). Sharp delivery, no stories.
+
+Your job: Help customers find wetin fit them, explain the quality, and vibe with them. 
+If they ask anything outside merch or TPB, find way bring am back to the clothes politely.`;
 
 const usePaystack = () => {
   const [loaded, setLoaded] = useState(false);
@@ -90,7 +132,7 @@ const App = () => {
   
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([
-    { role: 'assistant', text: "Oshey! Welcome to TPB Merch House. You wan check correct size for your body? Just ask me!" }
+    { role: 'assistant', text: "Oshey! Welcome to TPB Merch House. I be the TPB Merch Guy. How I fit help you represent the culture today?" }
   ]);
   const [userInput, setUserInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -126,21 +168,18 @@ const App = () => {
 
   const addToCart = (product) => {
     const size = selectedSizes[product.id];
-    if (!size && product.category !== 'Accessories' && product.category !== 'Caps') {
-      return; 
-    }
+    if (!size && product.category !== 'Accessories' && product.category !== 'Caps') return;
 
     setCart(prev => {
       const itemKey = `${product.id}-${size || 'N/A'}`;
       const exists = prev.find(item => `${item.id}-${item.size}` === itemKey);
-      
       if (exists) {
         return prev.map(item => `${item.id}-${item.size}` === itemKey ? { ...item, qty: item.qty + 1 } : item);
       }
       return [...prev, { ...product, size: size || 'One Size', qty: 1 }];
     });
-    setCheckoutStep('cart');
     setIsCartOpen(true);
+    setCheckoutStep('cart');
   };
 
   const updateQty = (id, size, delta) => {
@@ -157,28 +196,14 @@ const App = () => {
 
   const sendMessage = async () => {
     if (!userInput.trim()) return;
-    const userMsg = { role: 'user', text: userInput };
-    setChatMessages(prev => [...prev, userMsg]);
+    const currentInput = userInput;
+    setChatMessages(prev => [...prev, { role: 'user', text: currentInput }]);
     setUserInput("");
     setIsTyping(true);
 
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: userInput }] }],
-          systemInstruction: { parts: [{ text: CHAT_SYSTEM_PROMPT }] }
-        })
-      });
-      const result = await response.json();
-      const botText = result.candidates?.[0]?.content?.parts?.[0]?.text || "Network dey trip small, abeg try again.";
-      setChatMessages(prev => [...prev, { role: 'assistant', text: botText }]);
-    } catch (e) {
-      setChatMessages(prev => [...prev, { role: 'assistant', text: "Omo, network slow. Try again!" }]);
-    } finally {
-      setIsTyping(false);
-    }
+    const botResponse = await callGeminiWithRetry(currentInput, CHAT_SYSTEM_PROMPT);
+    setChatMessages(prev => [...prev, { role: 'assistant', text: botResponse }]);
+    setIsTyping(false);
   };
 
   const payWithPaystack = () => {
@@ -233,7 +258,7 @@ const App = () => {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => setIsCartOpen(true)} 
-            className="flex items-center gap-2 bg-stone-950 text-white px-5 py-3 rounded-xl font-bold hover:bg-orange-600 transition-all shadow-lg shadow-stone-900/10"
+            className="flex items-center gap-2 bg-stone-950 text-white px-5 py-3 rounded-xl font-bold hover:bg-orange-600 transition-all shadow-lg"
           >
             <ShoppingBag className="w-5 h-5" />
             <span className="hidden sm:inline">Basket</span>
@@ -288,7 +313,7 @@ const App = () => {
                 whileTap={{ scale: 0.95 }}
                 key={cat} 
                 onClick={() => setActiveCategory(cat)} 
-                className={`px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${activeCategory === cat ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-stone-400 border border-stone-100 hover:border-orange-200'}`}
+                className={`px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${activeCategory === cat ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-stone-400 border border-stone-100'}`}
               >
                 {cat}
               </motion.button>
@@ -328,7 +353,6 @@ const App = () => {
                   
                   <p className="text-stone-500 text-sm mb-8 font-medium line-clamp-2 leading-relaxed">{product.description}</p>
                   
-                  {/* Size Picker UI */}
                   {(product.category !== 'Caps' && product.category !== 'Accessories') && (
                     <div className="mb-8">
                       <p className="text-[10px] font-black uppercase tracking-widest text-stone-400 mb-4">Select Size:</p>
@@ -449,9 +473,6 @@ const App = () => {
         </div>
         <div className="max-w-7xl mx-auto px-6 pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-8 relative z-10">
           <p className="text-stone-500 font-black uppercase text-[10px] tracking-[0.3em]">© 2026 THE PIDGIN BLOG MERCH HOUSE. REPRESENT THE CULTURE.</p>
-          <div className="flex gap-8 text-[10px] font-black uppercase tracking-[0.3em] text-stone-600">
-            <a href="#" className="hover:text-stone-400">Privacy</a><a href="#" className="hover:text-stone-400">Terms</a><a href="#" className="hover:text-stone-400">Cookies</a>
-          </div>
         </div>
         <AnkaraBorder className="absolute bottom-0 left-0" />
       </footer>
@@ -490,20 +511,25 @@ const App = () => {
                 <div ref={chatEndRef} />
               </div>
               <div className="p-6 bg-white border-t border-stone-100 flex gap-3">
-                <input type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Ask me anything in Pidgin..." className="flex-1 bg-stone-50 border-none rounded-2xl px-5 py-4 text-sm font-bold focus:ring-2 ring-orange-500 outline-none" />
+                <input 
+                  type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} 
+                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()} 
+                  placeholder="Ask me anything in Pidgin..." 
+                  className="flex-1 bg-stone-50 border-none rounded-2xl px-5 py-4 text-sm font-bold focus:ring-2 ring-orange-500 outline-none" 
+                />
                 <motion.button whileTap={{ scale: 0.9 }} onClick={sendMessage} className="bg-orange-600 text-white p-4 rounded-2xl shadow-lg"><Send className="w-5 h-5" /></motion.button>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
         
-        <div className="relative group">
+        <div className="relative group flex items-center justify-end">
           {/* Label: "Ask Me" */}
           {!isChatOpen && (
              <motion.div 
                initial={{ opacity: 0, x: 20 }}
                animate={{ opacity: 1, x: 0 }}
-               className="absolute -left-24 top-1/2 -translate-y-1/2 bg-stone-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl border border-stone-800 whitespace-nowrap pointer-events-none"
+               className="absolute right-20 top-1/2 -translate-y-1/2 bg-stone-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl border border-stone-800 whitespace-nowrap pointer-events-none mr-2"
              >
                Ask Me
                <div className="absolute right-[-4px] top-1/2 -translate-y-1/2 w-2 h-2 bg-stone-900 rotate-45" />
@@ -537,7 +563,8 @@ const App = () => {
                 <button onClick={() => setIsCartOpen(false)} className="p-4 hover:bg-stone-50 rounded-full transition-colors"><X className="w-8 h-8" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-10 no-scrollbar">
-                {checkoutStep === 'cart' ? (cart.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-center opacity-30"><ShoppingBag className="w-24 h-24 mb-6" /><h3 className="text-2xl font-black uppercase tracking-widest">No Gbedu inside</h3></div> : <div className="space-y-10">{cart.map((item, i) => (
+                {checkoutStep === 'cart' ? (cart.length === 0 ? <div className="h-full flex flex-col items-center justify-center text-center opacity-30"><ShoppingBag className="w-24 h-24 mb-6" /><h3 className="text-2xl font-black uppercase tracking-widest">No Gbedu inside</h3></div> : <div className="space-y-10">
+                    {cart.map((item, i) => (
                     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }} key={`${item.id}-${item.size}`} className="flex gap-8 group font-black">
                       <div className="w-32 h-40 bg-stone-100 rounded-[2rem] overflow-hidden shrink-0 shadow-sm"><img src={item.image} alt={item.name} className="w-full h-full object-cover" /></div>
                       <div className="flex-1 flex flex-col justify-between py-2">
@@ -559,7 +586,6 @@ const App = () => {
         )}
       </AnimatePresence>
 
-      {/* Success Modal */}
       <AnimatePresence>{orderPlaced && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-blue-950/90 backdrop-blur-xl"><motion.div initial={{ scale: 0.8, y: 50 }} animate={{ scale: 1, y: 0 }} className="bg-white rounded-[4rem] p-16 max-w-lg w-full text-center shadow-5xl border-8 border-orange-500/10"><div className="w-32 h-32 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-10 shadow-inner"><ShieldCheck size={64} /></div><h4 className="text-5xl font-black mb-6 uppercase tracking-tighter">E DON HAPPEN! 🎉</h4><p className="text-stone-500 font-bold mb-12 leading-relaxed uppercase text-sm tracking-wide">Order don land! Payment confirmed sharp-sharp. Look out for our call.</p><div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden"><motion.div initial={{ x: '-100%' }} animate={{ x: '0%' }} transition={{ duration: 5 }} className="h-full bg-orange-600"></motion.div></div></motion.div></motion.div>)}</AnimatePresence>
       <style>{`.no-scrollbar::-webkit-scrollbar { display: none; }.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }::selection { background: #ea580c; color: white; }`}</style>
     </div>
